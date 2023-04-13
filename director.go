@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"open-match.dev/open-match/pkg/pb"
 )
@@ -14,13 +15,37 @@ type Assigner interface {
 
 type Director struct {
 	backend  pb.BackendServiceClient
+	profile  *pb.MatchProfile
+	mfConfig *pb.FunctionConfig
 	assigner Assigner
+	// TODO(castaneai): logger
 }
 
-func NewDirector(backend pb.BackendServiceClient, assigner Assigner) *Director {
+func NewDirector(backend pb.BackendServiceClient, profile *pb.MatchProfile, mfConfig *pb.FunctionConfig, assigner Assigner) *Director {
 	return &Director{
 		backend:  backend,
+		profile:  profile,
+		mfConfig: mfConfig,
 		assigner: assigner,
+	}
+}
+
+func (d *Director) Run(ctx context.Context, period time.Duration) error {
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			matches, err := d.FetchMatches(ctx, d.profile, d.mfConfig)
+			if err != nil {
+				return err
+			}
+			if _, err := d.AssignTickets(ctx, matches); err != nil {
+				return err
+			}
+		}
 	}
 }
 
