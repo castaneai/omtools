@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/sethvargo/go-retry"
@@ -54,10 +55,18 @@ func NewDirector(backend pb.BackendServiceClient,
 
 func isRetryableError(err error) bool {
 	st, ok := status.FromError(err)
-	if ok && st.Code() == codes.Unavailable {
+	// Open Match consists of many components,
+	// and when some components are temporarily down, it usually returns code: Unavailable.
+	if ok && (st.Code() == codes.Unavailable || containsUnavailableError(st)) {
 		return true
 	}
 	return false
+}
+
+func containsUnavailableError(st *status.Status) bool {
+	// If Match Function is temporarily down,
+	// you get an Unavailable error wrapped with code = Unknown.
+	return strings.Contains(st.String(), "rpc error: code = Unavailable")
 }
 
 func (d *Director) Run(ctx context.Context, period time.Duration) error {
