@@ -54,11 +54,10 @@ func NewDirector(backend pb.BackendServiceClient,
 }
 
 func isRetryableError(err error) bool {
-	st, ok := status.FromError(err)
 	// Open Match consists of many components,
 	// and when some components are temporarily down, it usually returns code: Unavailable.
-	if ok && (st.Code() == codes.Unavailable || containsUnavailableError(st)) {
-		return true
+	if st := new(status.Status); asStatus(err, &st) {
+		return st.Code() == codes.Unavailable || containsUnavailableError(st)
 	}
 	return false
 }
