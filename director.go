@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sethvargo/go-retry"
-	"golang.org/x/exp/slog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"open-match.dev/open-match/pkg/pb"
@@ -38,19 +37,49 @@ type Director struct {
 	profile  *pb.MatchProfile
 	mfConfig *pb.FunctionConfig
 	assigner Assigner
-	logger   *slog.Logger
+	logger   Logger
+}
+
+type directorOptions struct {
+	Logger Logger
+}
+
+func defaultDirectorOptions() *directorOptions {
+	return &directorOptions{
+		Logger: defaultLogger,
+	}
+}
+
+type DirectorOption interface {
+	apply(options *directorOptions)
+}
+
+type DirectorOptionFunc func(options *directorOptions)
+
+func (f DirectorOptionFunc) apply(options *directorOptions) {
+	f(options)
 }
 
 func NewDirector(backend pb.BackendServiceClient,
 	profile *pb.MatchProfile, mfConfig *pb.FunctionConfig,
-	assigner Assigner) *Director {
+	assigner Assigner, opts ...DirectorOption) *Director {
+	dopts := defaultDirectorOptions()
+	for _, opt := range opts {
+		opt.apply(dopts)
+	}
 	return &Director{
 		backend:  backend,
 		profile:  profile,
 		mfConfig: mfConfig,
 		assigner: assigner,
-		logger:   slog.Default(), // TODO(castaneai): custom logger
+		logger:   dopts.Logger,
 	}
+}
+
+func WithDirectorLogger(logger Logger) DirectorOption {
+	return DirectorOptionFunc(func(options *directorOptions) {
+		options.Logger = logger
+	})
 }
 
 func isRetryableError(err error) bool {
@@ -68,10 +97,10 @@ func containsUnavailableError(st *status.Status) bool {
 	return strings.Contains(st.String(), "rpc error: code = Unavailable")
 }
 
-func (d *Director) Run(ctx context.Context, period time.Duration) error {
-	d.logger.Debug(fmt.Sprintf("director started (period: %s)", period))
+func (d *Director) Run(ctx context.Context, tickRate time.Duration) error {
+	d.logger.Infof("director started (tickRate: %s)", tickRate)
 	b := newRetryBackoff()
-	ticker := time.NewTicker(period)
+	ticker := time.NewTicker(tickRate)
 	defer ticker.Stop()
 	for {
 		select {
@@ -82,10 +111,11 @@ func (d *Director) Run(ctx context.Context, period time.Duration) error {
 			if err := retry.Do(ctx, b, func(ctx context.Context) error {
 				ms, err := d.FetchMatches(ctx)
 				if err != nil {
-					d.logger.Error(fmt.Sprintf("failed to fetch matches: %+v", err))
 					if isRetryableError(err) {
+						d.logger.Debugf("failed to fetch matches, retrying...: %+v", err)
 						return retry.RetryableError(err)
 					}
+					d.logger.Errorf("failed to fetch matches: %+v", err)
 					return err
 				}
 				matches = append(matches, ms...)
@@ -95,17 +125,13 @@ func (d *Director) Run(ctx context.Context, period time.Duration) error {
 			}
 
 			if len(matches) > 0 {
-				if err := retry.Do(ctx, b, func(ctx context.Context) error {
-					if _, err := d.AssignTickets(ctx, matches); err != nil {
-						if isRetryableError(err) {
-							return retry.RetryableError(err)
-						}
-						return err
+				if _, err := d.AssignTickets(ctx, matches); err != nil {
+					if isRetryableError(err) {
+						return retry.RetryableError(err)
 					}
-					return nil
-				}); err != nil {
 					return err
 				}
+				return nil
 			}
 		}
 	}
