@@ -6,7 +6,7 @@ require (
 	github.com/redis/go-redis/v9 v9.0.2
 	github.com/sethvargo/go-retry v0.2.4
 	github.com/stretchr/testify v1.8.1
-	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
+	go.uber.org/zap v1.24.0
 	google.golang.org/grpc v1.51.0
 	google.golang.org/protobuf v1.30.0
 	open-match.dev/open-match v1.7.0
@@ -22,7 +22,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/net v0.3.1-0.20221206200815-1e63c2f08a10 // indirect
 	golang.org/x/sys v0.3.0 // indirect
 	golang.org/x/text v0.5.0 // indirect

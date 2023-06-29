@@ -2,11 +2,12 @@ package omtools
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -73,6 +74,12 @@ func TestDirector(t *testing.T) {
 	mfConfig := &pb.FunctionConfig{}
 	backend := setupMockBackend(t)
 	director := NewDirector(backend, profile, mfConfig, &dummyAssigner{})
-	ctx := context.Background()
-	assert.NoError(t, director.Run(ctx, 1*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	errCh := make(chan error)
+	go func() {
+		errCh <- director.Run(ctx, 100*time.Millisecond)
+	}()
+	err := <-errCh
+	require.True(t, errors.Is(err, context.DeadlineExceeded) || hasStatusCode(err, codes.DeadlineExceeded))
 }

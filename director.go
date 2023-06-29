@@ -131,7 +131,6 @@ func (d *Director) Run(ctx context.Context, tickRate time.Duration) error {
 					}
 					return err
 				}
-				return nil
 			}
 		}
 	}
