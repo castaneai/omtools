@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,8 +17,8 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		log.Printf("Usage: ./om-ticket-cleaner <REDIS_ADDR> <STALE_TIME>")
-		log.Printf("Example: ./om-ticket-cleaner 127.0.0.1:6379 10m")
+		log.Printf("Usage: om-ticket-cleaner <REDIS_ADDR> <STALE_TIME>")
+		log.Printf("Example: om-ticket-cleaner 127.0.0.1:6379 10m")
 		os.Exit(2)
 	}
 	addr := os.Args[1]
@@ -23,12 +27,15 @@ func main() {
 		log.Printf("failed to parse duration: %s: %+v", os.Args[2], err)
 		os.Exit(2)
 	}
-	log.Printf("cleaning staled tickets...(redis: %s, stale time: %s)", addr, staleTime)
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	client := redis.NewClient(&redis.Options{
 		Addr: addr,
 	})
-	ctx := context.Background()
+	if _, err := client.Ping(ctx).Result(); err != nil {
+		log.Fatalf("failed to connect to Redis: %+v", err)
+	}
 	result, err := client.SMembers(ctx, "allTickets").Result()
 	if err != nil {
 		log.Fatalf("failed to SMEMBERS: %+v", err)
@@ -41,9 +48,9 @@ func main() {
 			log.Printf("failed to GET ticket: %s: %+v", ticketKey, err)
 			continue
 		}
-		var ticket pb.Ticket
-		if err := proto.Unmarshal([]byte(data), &ticket); err != nil {
-			log.Printf("failed to unmarshal ticket data: %+v", err)
+		ticket, err := decodeTicket(data)
+		if err != nil {
+			log.Printf("failed to decode ticket: %+v", err)
 			continue
 		}
 		if time.Since(ticket.CreateTime.AsTime()) >= staleTime {
@@ -59,4 +66,17 @@ func main() {
 			log.Fatalf("failed to delete ticket keys: %+v", err)
 		}
 	}
+}
+
+func decodeTicket(data string) (*pb.Ticket, error) {
+	var t pb.Ticket
+	b := []byte(data)
+	// HACK: miniredis support
+	if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+		b = decoded
+	}
+	if err := proto.Unmarshal(b, &t); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Ticket: %w", err)
+	}
+	return &t, nil
 }
